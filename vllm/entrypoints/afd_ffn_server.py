@@ -50,6 +50,9 @@ class AFDFFNServer:
     def _run_server_loop(self) -> None:
         """Start FFN workers and wait for completion"""
         logger.info("AFD FFN Server started, workers running...")
+        print("=" * 80)
+        print("\033[91m🚀 TEST: Git workflow test - FFN Server is running!\033[0m")
+        print("=" * 80)
         try:
             # Tell workers to start FFN server loops (one-time call)
             self.model_executor.collective_rpc("start_ffn_server_loop")
