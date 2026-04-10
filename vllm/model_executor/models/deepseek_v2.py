@@ -2048,7 +2048,25 @@ class DeepseekV2ForCausalLM(
 
         params_dict = dict(self.named_parameters())
         loaded_params: set[str] = set()
-        for name, loaded_weight in weights:
+        
+        # 权重映射：当 first_k_dense_replace=0 时，将 Layer 1 的 MoE 权重复制到 Layer 0
+        weights_list = list(weights)
+        if self.config.first_k_dense_replace == 0:
+            mapped_weights = []
+            for name, loaded_weight in weights_list:
+                mapped_weights.append((name, loaded_weight))
+                # 复制 Layer 1 的 MoE 权重到 Layer 0
+                if "model.layers.1.mlp" in name:
+                    is_moe_weight = any(keyword in name for keyword in [
+                        "experts", "shared_experts", "gate.weight", 
+                        "gate.e_score_correction_bias", "w2_weight", "w13_weight"
+                    ])
+                    if is_moe_weight:
+                        layer0_name = name.replace("model.layers.1.", "model.layers.0.")
+                        mapped_weights.append((layer0_name, loaded_weight))
+            weights_list = mapped_weights
+        
+        for name, loaded_weight in weights_list:
             set_substitute_tp(0)
             if "shared_experts" in name:
                 # TODO(lxf) temperory solution for ffn support dp
