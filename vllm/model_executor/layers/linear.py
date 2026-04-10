@@ -383,6 +383,30 @@ class ReplicatedLinear(LinearBase):
         if len(loaded_weight.shape) == 0:
             loaded_weight = loaded_weight.reshape(1)
 
+        # Handle expert count mismatch (for testing with different n_routed_experts)
+        # This allows loading checkpoints with different number of experts
+        if param.size(0) != loaded_weight.size(0) and len(param.size()) > 1:
+            if param.size(0) < loaded_weight.size(0):
+                # Truncate: only use first N experts
+                # Example: loading 64-expert checkpoint into 32-expert model
+                logger.warning(
+                    f"Truncating expert weights from {loaded_weight.size(0)} "
+                    f"to {param.size(0)} experts. "
+                    f"Weight size: {loaded_weight.size()} -> {(param.size(0), *loaded_weight.size()[1:])}"
+                )
+                loaded_weight = loaded_weight[:param.size(0)]
+            else:
+                # Pad: repeat experts (for testing only, not recommended for production)
+                # Example: loading 32-expert checkpoint into 64-expert model
+                logger.warning(
+                    f"Padding expert weights from {loaded_weight.size(0)} "
+                    f"to {param.size(0)} experts by repeating. "
+                    f"Weight size: {loaded_weight.size()} -> {param.size()}"
+                )
+                repeat_times = (param.size(0) + loaded_weight.size(0) - 1) // loaded_weight.size(0)
+                loaded_weight = loaded_weight.repeat(repeat_times, *([1] * (len(loaded_weight.shape) - 1)))
+                loaded_weight = loaded_weight[:param.size(0)]
+
         assert param.size() == loaded_weight.size(), (
             f"Tried to load weights of size {loaded_weight.size()}"
             f"to a parameter of size {param.size()}"
