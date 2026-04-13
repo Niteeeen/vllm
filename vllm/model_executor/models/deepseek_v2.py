@@ -2048,24 +2048,42 @@ class DeepseekV2ForCausalLM(
 
         params_dict = dict(self.named_parameters())
         loaded_params: set[str] = set()
-        
-        # 权重映射：当 first_k_dense_replace=0 时，将 Layer 1 的 MoE 权重复制到 Layer 0
+
+        # 权重映射：当 first_k_dense_replace=0 时，将第一个 MoE 层的权重复制到所有前面的层
         weights_list = list(weights)
         if self.config.first_k_dense_replace == 0:
-            mapped_weights = []
-            for name, loaded_weight in weights_list:
-                mapped_weights.append((name, loaded_weight))
-                # 复制 Layer 1 的 MoE 权重到 Layer 0
-                if "model.layers.1.mlp" in name:
-                    is_moe_weight = any(keyword in name for keyword in [
-                        "experts", "shared_experts", "gate.weight", 
-                        "gate.e_score_correction_bias", "w2_weight", "w13_weight"
-                    ])
-                    if is_moe_weight:
-                        layer0_name = name.replace("model.layers.1.", "model.layers.0.")
-                        mapped_weights.append((layer0_name, loaded_weight))
-            weights_list = mapped_weights
-        
+            # 1. 找到第一个包含 MoE 权重的层索引
+            first_moe_layer = None
+            moe_keywords = ["experts", "shared_experts", "gate.weight", 
+                            "gate.e_score_correction_bias", "w2_weight", "w13_weight"]
+            for name, _ in weights_list:
+                if "model.layers." in name and any(kw in name for kw in moe_keywords):
+                    # 提取层索引
+                    import re
+                    match = re.search(r"model\.layers\.(\d+)\.", name)
+                    if match:
+                        layer_idx = int(match.group(1))
+                        if first_moe_layer is None or layer_idx < first_moe_layer:
+                            first_moe_layer = layer_idx
+            if first_moe_layer is None:
+                # 没有 MoE 层，保持原样
+                mapped_weights = weights_list
+            else:
+                mapped_weights = []
+                for name, loaded_weight in weights_list:
+                    mapped_weights.append((name, loaded_weight))
+                    # 检查是否是需要复制的 MoE 权重（来自第一个 MoE 层）
+                    if f"model.layers.{first_moe_layer}.mlp" in name:
+                        is_moe_weight = any(kw in name for kw in moe_keywords)
+                        if is_moe_weight:
+                            # 复制到所有前面的层
+                            for target_layer in range(first_moe_layer):
+                                target_name = name.replace(
+                                    f"model.layers.{first_moe_layer}.", 
+                                    f"model.layers.{target_layer}."
+                                )
+                                mapped_weights.append((target_name, loaded_weight))
+
         for name, loaded_weight in weights_list:
             set_substitute_tp(0)
             if "shared_experts" in name:
